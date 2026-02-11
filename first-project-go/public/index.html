@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>WhatsApp Clone</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #e5ddd5; }
+        .side { width: 300px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        .main { flex: 1; display: flex; flex-direction: column; }
+        .header { padding: 15px; background: #ededed; border-bottom: 1px solid #ddd; font-weight: bold; }
+        #contact-list { flex: 1; overflow-y: auto; }
+        .contact-item { padding: 15px; border-bottom: 1px solid #eee; cursor: pointer; transition: 0.3s; }
+        .contact-item:hover { background: #f5f5f5; }
+        .contact-item.active { background: #ebebeb; border-left: 5px solid #25d366; }
+        #chat-window { flex: 1; overflow-y: scroll; padding: 20px; display: flex; flex-direction: column; gap: 8px; }
+        .bubble { padding: 8px 12px; border-radius: 8px; max-width: 70%; font-size: 14px; }
+        .sent { align-self: flex-end; background: #dcf8c6; }
+        .recv { align-self: flex-start; background: white; }
+        .footer { padding: 10px; background: #f0f0f0; display: flex; gap: 10px; }
+        input { flex: 1; padding: 10px; border-radius: 20px; border: 1px solid #ddd; outline: none; }
+    </style>
+</head>
+<body>
+    <div class="side">
+        <div class="header">Saya: <span id="me"></span></div>
+        <div style="padding: 10px; border-bottom: 1px solid #ddd;">
+            <input type="text" id="newTarget" placeholder="Cari ID baru (Enter)..." onkeypress="handleNewChat(event)">
+        </div>
+        <div id="contact-list"></div>
+    </div>
+    <div class="main">
+        <div class="header" id="targetName">Pilih Chat</div>
+        <div id="chat-window"></div>
+        <div class="footer">
+            <input type="text" id="msgInput" placeholder="Ketik pesan...">
+            <button onclick="send()">Kirim</button>
+        </div>
+    </div>
+
+    <script>
+        const myID = prompt("Masukkan ID Anda:");
+        document.getElementById('me').innerText = myID;
+        let activeTarget = null;
+        let contacts = new Set();
+
+        // Hubungkan ke WebSocket
+        const socket = new WebSocket("ws://" + window.location.host + "/ws/" + myID);
+
+        // Load kontak dari API Backend
+        fetch("/api/contacts/" + myID)
+            .then(r => r.json())
+            .then(data => {
+                if(data) data.forEach(c => addContactToUI(c));
+            });
+
+        socket.onmessage = (e) => {
+            const m = JSON.parse(e.data);
+            const partner = m.from === myID ? m.to : m.from;
+            
+            if (!contacts.has(partner)) {
+                addContactToUI(partner);
+            }
+
+            if (partner === activeTarget) {
+                renderMsg(m);
+            }
+        };
+
+        function addContactToUI(id) {
+            if (contacts.has(id)) return;
+            contacts.add(id);
+            const div = document.createElement('div');
+            div.className = 'contact-item';
+            div.id = 'contact-' + id;
+            div.innerText = 'User ' + id;
+            div.onclick = () => startChat(id);
+            document.getElementById('contact-list').appendChild(div);
+        }
+
+        async function startChat(id) {
+            activeTarget = id;
+            document.getElementById('targetName').innerText = "Chat dengan " + id;
+            document.querySelectorAll('.contact-item').forEach(el => el.classList.remove('active'));
+            const contactEl = document.getElementById('contact-'+id);
+            if(contactEl) contactEl.classList.add('active');
+
+            const res = await fetch("/api/history/" + myID + "/" + id);
+            const history = await res.json();
+            document.getElementById('chat-window').innerHTML = "";
+            if(history) history.forEach(renderMsg);
+        }
+
+        function handleNewChat(e) {
+            if (e.key === 'Enter') {
+                const id = e.target.value;
+                if (id && id !== myID) {
+                    addContactToUI(id);
+                    startChat(id);
+                    e.target.value = "";
+                }
+            }
+        }
+
+        function renderMsg(m) {
+            const div = document.createElement('div');
+            div.className = 'bubble ' + (m.from === myID ? 'sent' : 'recv');
+            div.innerText = m.content;
+            const win = document.getElementById('chat-window');
+            win.appendChild(div);
+            win.scrollTop = win.scrollHeight;
+        }
+
+        function send() {
+            const inp = document.getElementById('msgInput');
+            if (!activeTarget || !inp.value) return;
+            const payload = { from: myID, to: activeTarget, content: inp.value };
+            socket.send(JSON.stringify(payload));
+            inp.value = "";
+        }
+    </script>
+</body>
+</html>
